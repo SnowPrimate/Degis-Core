@@ -84,6 +84,4 @@ contract CoreStakingPool is Ownable, BasePool {
 
         super._unstake(_user, _depositId, _amount);
     }
-
-    function _extendLockPeriod(_user, _depositId, _newLockUntil) internal override
 }
