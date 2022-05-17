@@ -427,11 +427,20 @@ abstract contract BasePool is IPool, ReentrancyGuard {
 
         require(stakeDeposit.lockedUntil < _newLockUntil, "Invalid lock interval");
 
+        // calculate new weight and get previous weight
         uint256 newWeight = timeToWeight( _newLockUntil - stakeDeposit.lockedFrom) * stakeDeposit.tokenAmount;
+        uint256 previousWeight = stakeDeposit.weight;
 
         // update the deposit
         stakeDeposit.lockedUntil = _newLockUntil;
         stakeDeposit.weight = newWeight;
+        
+        // update user total weight and rewardDebt
+        user.totalWeight = user.totalWeight - previousWeight + newWeight;
+        user.rewardDebt = weightToReward(user.totalWeight, accDegisPerWeight);
+
+        // update global variable total weight and emit an event
+        totalWeight -= (previousWeight - newWeight);
         emit Stake(user, stakeDeposit.tokenAmount, _newLockUntil);
     }
 
@@ -448,12 +457,21 @@ abstract contract BasePool is IPool, ReentrancyGuard {
         Deposit storage stakeDeposit = user.deposits[_depositId];
 
         require(stakeDeposit.lockedUntil > _newLockUntil, "Invalid lock interval");
-
+        
+        // calculate new weight and get previous weight
         uint256 newWeight = timeToWeight( _newLockUntil - stakeDeposit.lockedFrom) * stakeDeposit.tokenAmount;
+        uint256 previousWeight = stakeDeposit.weight;
 
         // update the deposit
         stakeDeposit.lockedUntil = _newLockUntil;
         stakeDeposit.weight = newWeight;
+        
+        // update user total weight and rewardDebt
+        user.totalWeight = user.totalWeight - previousWeight + newWeight;
+        user.rewardDebt = weightToReward(user.totalWeight, accDegisPerWeight);
+
+        // update global variable total weight and emit an event
+        totalWeight -= (previousWeight - newWeight);
         emit Stake(user, stakeDeposit.tokenAmount, _newLockUntil);
     }
 
