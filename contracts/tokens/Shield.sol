@@ -27,11 +27,16 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
     // ---------------------------------------------------------------------------------------- //
 
     // PTP USD Pool to be used for swapping stablecoins
-     address public PTPPOOL = 0x66357dCaCe80431aee0A7507e2E361B7e2402370;
-    //Curve YUSDC Pool
-    address public CURVEYUSDCTPOOL = 0x1da20Ac34187b2d9c74F729B85acB225D3341b25;
-    address public CURVEUSDCeUSDCPOOL = 0x3a43A5851A3e3E0e25A3c1089670269786be1577;
-    address public CURVEaTRICURVEPOOL = 0xB755B949C126C04e0348DD881a5cF55d424742B2;
+    address public PTP_POOL = 0x66357dCaCe80431aee0A7507e2E361B7e2402370;
+    address public P_YUSD_POOL = 0xC828D995C686AaBA78A4aC89dfc8eC0Ff4C5be83;
+
+    address public C_YUSD_USDC_USDT_POOL = 0x1da20Ac34187b2d9c74F729B85acB225D3341b25;
+    address public C_USDC_eUSDC_POOL = 0x3a43A5851A3e3E0e25A3c1089670269786be1577;
+    address public C_DAIe_USDCe_USDTe_POOL = 0xB755B949C126C04e0348DD881a5cF55d424742B2;
+
+    
+
+
     // Constant stablecoin addresses
     address public constant USDC = 0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E;
     address public constant USDCe = 0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664;
@@ -51,10 +56,26 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         uint256 collateralRatio;
     }
 
+    struct Target {
+        address poolToUse;
+        address toAddress;
+        int128 fromIndex;
+        int128 toIndex;
+    }
+
+    
+
     // stablecoin => whether supported
     mapping(address => bool) public supportedStablecoin;
 
     mapping(address => uint256) public users;
+    // stablecoin => pool&address to use
+    mapping(address => Target) public curveTarget;
+    // yusd => c_yusd, 0, 1, USDC
+    // usdt => c_yusd, 2, 1, USDC
+    // eusdc => c_usdc, 0, 1, USDC
+    // usdte => c_daie, 2, 1, USDCe
+    // daie => c_daie, 0, 1, USDCe
 
     // ------------------------------------------------------------------------- --------------- //
     // *************************************** Events ***************************************** //
@@ -92,6 +113,8 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         supportedStablecoin[DAIe] = true;
         // YUSD
         supportedStablecoin[YUSD] = true;
+
+
     }
 
     // ---------------------------------------------------------------------------------------- //
@@ -121,6 +144,25 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         PTPPOOL = _ptpPool;
     }
 
+    function setPTPYUSDPool(address _ptpYUSDPool) external onlyOwner {
+        emit SetPTPPool(PTPYUSDPOOL, _ptpYUSDPool);
+        PTPYUSDPOOL = _ptpYUSDPool;
+    }
+
+    function setCurvePool(address _curvePool) external onlyOwner {
+        emit SetPTPPool(CURVEPOOL, _curvePool);
+        CURVEPOOL = _curvePool;
+    }
+
+    function addCurvePool(
+        address _stablecoin,
+        address _poolToUse,
+        address _toAddress,
+        int128 _fromIndex,
+        int128 _toIndex
+        ) external onlyOwner {
+            curveTarget[_stablecoin] = Target(_poolToUse, _toAddress, _fromIndex, _toIndex);
+        }
     /**
      * @notice Get discount by veDEG
      * @dev The discount depends on veDEG
@@ -147,6 +189,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
      */
     function deposit(
         address _stablecoin,
+        bool _curve,
         uint256 _amount,
         uint256 _minAmount
     ) external {
@@ -167,6 +210,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
             outAmount = _swap(
                 _stablecoin,
                 USDC,
+                _curve,
                 inAmount,
                 _minAmount,
                 address(this),
@@ -234,11 +278,13 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         address _fromToken,
         address _toToken,
         uint256 _fromAmount,
+        bool _curve,
         uint256 _minToAmount,
         address _to,
         uint256 _deadline
     ) internal returns (uint256) {
-        bytes memory data = abi.encodeWithSignature(
+        if (!_curve) {
+            bytes memory data = abi.encodeWithSignature(
             "swap(address,address,uint256,uint256,address,uint256)",
             _fromToken,
             _toToken,
@@ -246,12 +292,55 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
             _minToAmount,
             _to,
             _deadline
+            );
+
+            if (_fromToken == YUSD){
+                (bool success, bytes memory res) = P_YUSD_POOL.call(data);
+            } else {
+                (bool success, bytes memory res) = PTPPOOL.call(data);
+                }
+        } else {
+            (bool success, bytes memory res) = _curveSwap(_fromToken, _fromAmount, _minToAmount);
+        }
+        
+        require(success, "swap failed");
+
+        (uint256 actualAmount, ) = abi.decode(res, (uint256, uint256));
+
+        return actualAmount;
+    }
+
+    function _curveSwap(
+        address _fromToken,
+        uint256 _fromAmount,
+        uint256 _minToAmount
+    ) internal returns (uint256) {
+        int128 a = curveTarget[_fromToken].fromIndex;
+        int128 b = curveTarget[_fromToken].toIndex;
+
+        bytes memory data = abi.encodeWithSignature(
+            "exchange(int128,int128,uint256,uint256)",
+            a,
+            b,
+            _fromAmount,
+            _minToAmount
         );
 
-        (bool success, bytes memory res) = PTPPOOL.call(data);
-
-        require(success, "PTP swap failed");
-
+        (bool success, bytes memory res) = curveTarget[_fromToken].poolToUse.call(data);
+        require(success, "swap failed");
+        if (curveTarget[_fromToken].toAddress != USDC) {
+            a = curveTarget[curveTarget[_fromToken].toAddress].fromIndex;
+            b = curveTarget[curveTarget[_fromToken].toAddress].toIndex;
+            (uint256 _actualAmount, ) = abi.decode(res, (uint256, uint256));
+            bytes memory data = abi.encodeWithSignature(
+                "get_dy(int128,int128,uint256,uint256)",
+                a,
+                b,
+                _actualAmount,
+                _minToAmount
+            );
+            (bool success, bytes memory res) = curveTarget[curveTarget[_fromToken].toAddress].poolToUse.call(data);
+        }
         (uint256 actualAmount, ) = abi.decode(res, (uint256, uint256));
 
         return actualAmount;
