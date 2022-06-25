@@ -6,7 +6,8 @@ import { IVeDEG } from "../governance/interfaces/IVeDEG.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { Curve } from "../interfaces/Curve.sol";
+import { ICurve } from "../interfaces/ICurve.sol";
+import { IPTP } from "../interfaces/IPTP.sol";
 
 /**
  * @title  Shield Token (Derived Stablecoin on Degis)
@@ -118,6 +119,33 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
     }
 
     // ---------------------------------------------------------------------------------------- //
+    // ************************************ View Functions ************************************ //
+    // ---------------------------------------------------------------------------------------- //
+
+    function getCurveMinAmount(address _stablecoin, uint256 _amount) public view returns (uint256) {
+        require(_stablecoin != address(0));
+        require(supportedStablecoin[_stablecoin]);
+        address stablecoin = _stablecoin;
+        uint256 minAmount;
+        while (stablecoin != USDC){
+            minAmount = _getMinAmount(_stablecoin, _amount);
+            stablecoin = curveTarget[stablecoin]._toAddress;
+        }
+        return minAmount;
+    }
+
+    function getPTPMinAmount(address _from, address _to, uint256 _amount) public view returns (uint256) {
+        require(_from != address(0), "from address cannot be 0");
+        require(_to != address(0), "to address cannot be 0");
+        require(supportedStablecoin[_from], "from address is not supported");
+        require(supportedStablecoin[_to],  "to address is not supported");
+        (uint256 potentialOutcome, ) = IPTP(PTP_POOL).quotePotentialSwap(_from, _to, _amount);
+        return potentialOutcome;
+    }
+
+
+
+    // ---------------------------------------------------------------------------------------- //
     // ************************************ Set Functions ************************************* //
     // ---------------------------------------------------------------------------------------- //
 
@@ -150,7 +178,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
     }
 
     function setCurvePool(address _curvePool) external onlyOwner {
-        emit SetPTPPool(CURVEPOOL, _curvePool);
+        emit SetCurvePool(CURVEPOOL, _curvePool);
         CURVEPOOL = _curvePool;
     }
 
@@ -162,7 +190,8 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         int128 _toIndex
         ) external onlyOwner {
             curveTarget[_stablecoin] = Target(_poolToUse, _toAddress, _fromIndex, _toIndex);
-        }
+    }
+
     /**
      * @notice Get discount by veDEG
      * @dev The discount depends on veDEG
@@ -205,9 +234,13 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         // Transfer to this, no need for safeTransferFrom
         IERC20(_stablecoin).safeTransferFrom(msg.sender, address(this), _amount);
 
+
         if (_stablecoin != USDC) {
+            if (_curve) {
+                outAmount = _curveSwap(_stablecoin, _amount, _minToAmount);
+            } else {
             // Swap stablecoin to USDC and directly goes to this contract
-            outAmount = _swap(
+            outAmount = _swap (
                 _stablecoin,
                 USDC,
                 _curve,
@@ -216,6 +249,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
                 address(this),
                 block.timestamp + 60
             );
+            }
         } else {
             outAmount = inAmount;
         }
@@ -278,29 +312,24 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         address _fromToken,
         address _toToken,
         uint256 _fromAmount,
-        bool _curve,
         uint256 _minToAmount,
         address _to,
         uint256 _deadline
     ) internal returns (uint256) {
-        if (!_curve) {
-            bytes memory data = abi.encodeWithSignature(
-            "swap(address,address,uint256,uint256,address,uint256)",
-            _fromToken,
-            _toToken,
-            _fromAmount,
-            _minToAmount,
-            _to,
-            _deadline
-            );
+        bytes memory data = abi.encodeWithSignature(
+        "swap(address,address,uint256,uint256,address,uint256)",
+        _fromToken,
+        _toToken,
+        _fromAmount,
+        _minToAmount,
+        _to,
+        _deadline
+        );
 
-            if (_fromToken == YUSD){
-                (bool success, bytes memory res) = P_YUSD_POOL.call(data);
-            } else {
-                (bool success, bytes memory res) = PTPPOOL.call(data);
-                }
+        if (_fromToken == YUSD){
+            (bool success, bytes memory res) = P_YUSD_POOL.call(data);
         } else {
-            (bool success, bytes memory res) = _curveSwap(_fromToken, _fromAmount, _minToAmount);
+            (bool success, bytes memory res) = PTPPOOL.call(data);
         }
         
         require(success, "swap failed");
@@ -315,35 +344,32 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         uint256 _fromAmount,
         uint256 _minToAmount
     ) internal returns (uint256) {
-        int128 a = curveTarget[_fromToken].fromIndex;
-        int128 b = curveTarget[_fromToken].toIndex;
+        int128 i = curveTarget[_fromToken].fromIndex;
+        int128 j = curveTarget[_fromToken].toIndex;
 
         bytes memory data = abi.encodeWithSignature(
             "exchange(int128,int128,uint256,uint256)",
-            a,
-            b,
+            i,
+            j,
             _fromAmount,
             _minToAmount
         );
 
         (bool success, bytes memory res) = curveTarget[_fromToken].poolToUse.call(data);
         require(success, "swap failed");
-        if (curveTarget[_fromToken].toAddress != USDC) {
-            a = curveTarget[curveTarget[_fromToken].toAddress].fromIndex;
-            b = curveTarget[curveTarget[_fromToken].toAddress].toIndex;
-            (uint256 _actualAmount, ) = abi.decode(res, (uint256, uint256));
-            bytes memory data = abi.encodeWithSignature(
-                "get_dy(int128,int128,uint256,uint256)",
-                a,
-                b,
-                _actualAmount,
-                _minToAmount
-            );
-            (bool success, bytes memory res) = curveTarget[curveTarget[_fromToken].toAddress].poolToUse.call(data);
-        }
         (uint256 actualAmount, ) = abi.decode(res, (uint256, uint256));
-
+        if (curveTarget[_fromToken].toAddress != USDC) {
+            uint256 min = _getMinAmount(curveTarget[_fromToken].toAddress);
+            _curveSwap(curveTarget[_fromToken].toAddress,  actualAmount, min);
+        }
         return actualAmount;
+    }
+
+    function _getMinAmount(address _fromAddress, uint256 _amount) internal view returns(uint256) {
+        int128 i = curveTarget[_fromToken].fromIndex;
+        int128 j = curveTarget[_fromToken].toIndex;
+        uint256 expected = curveTarget[_fromAddress].poolToUse.get_dy(i, j, _amount) * 0.99;
+        return expected;
     }
 
     /**
