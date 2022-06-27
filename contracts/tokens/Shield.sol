@@ -6,8 +6,8 @@ import { IVeDEG } from "../governance/interfaces/IVeDEG.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { ICurve } from "../interfaces/ICurve.sol";
-import { IPTP } from "../interfaces/IPTP.sol";
+import { ICurve } from "./interfaces/ICurve.sol";
+import { IPTP } from "./interfaces/IPTP.sol";
 
 /**
  * @title  Shield Token (Derived Stablecoin on Degis)
@@ -31,12 +31,12 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
     address public PTP_POOL = 0x66357dCaCe80431aee0A7507e2E361B7e2402370;
     address public P_YUSD_POOL = 0xC828D995C686AaBA78A4aC89dfc8eC0Ff4C5be83;
 
-    address public C_YUSD_USDC_USDT_POOL = 0x1da20Ac34187b2d9c74F729B85acB225D3341b25;
-    address public C_USDC_eUSDC_POOL = 0x3a43A5851A3e3E0e25A3c1089670269786be1577;
-    address public C_DAIe_USDCe_USDTe_POOL = 0xB755B949C126C04e0348DD881a5cF55d424742B2;
-
-    
-
+    address public C_YUSD_USDC_USDT_POOL =
+        0x1da20Ac34187b2d9c74F729B85acB225D3341b25;
+    address public C_USDC_eUSDC_POOL =
+        0x3a43A5851A3e3E0e25A3c1089670269786be1577;
+    address public C_DAIe_USDCe_USDTe_POOL =
+        0xB755B949C126C04e0348DD881a5cF55d424742B2;
 
     // Constant stablecoin addresses
     address public constant USDC = 0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E;
@@ -64,19 +64,13 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         int128 toIndex;
     }
 
-    
-
     // stablecoin => whether supported
     mapping(address => bool) public supportedStablecoin;
 
     mapping(address => uint256) public users;
     // stablecoin => pool&address to use
     mapping(address => Target) public curveTarget;
-    // yusd => c_yusd, 0, 1, USDC
-    // usdt => c_yusd, 2, 1, USDC
-    // eusdc => c_usdc, 0, 1, USDC
-    // usdte => c_daie, 2, 1, USDCe
-    // daie => c_daie, 0, 1, USDCe
+    
 
     // ------------------------------------------------------------------------- --------------- //
     // *************************************** Events ***************************************** //
@@ -91,6 +85,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         uint256 outAmount
     );
     event Withdraw(address indexed user, uint256 amount);
+    event AddCurvePool(address stablecoin, address pool);
 
     // ---------------------------------------------------------------------------------------- //
     // ************************************* Constructor ************************************** //
@@ -115,35 +110,55 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         // YUSD
         supportedStablecoin[YUSD] = true;
 
-
+        //initialize curveTarget
+        // yusd => c_yusd, 0, 1, USDC
+        // usdt => c_yusd, 2, 1, USDC                     
+        // eusdc => c_usdc, 0, 1, USDC
+        // usdte => c_daie, 2, 1, USDCe
+        // daie => c_daie, 0, 1, USDCe
+        curveTarget[YUSD] = Target(C_YUSD_USDC_USDT_POOL, USDC, 0, 1);
+        curveTarget[USDT] = Target(C_YUSD_USDC_USDT_POOL, USDC, 2, 1);
+        curveTarget[USDCe] = Target(C_USDC_eUSDC_POOL, USDC, 0, 1);
+        curveTarget[USDTe] = Target(C_DAIe_USDCe_USDTe_POOL, USDCe, 2, 1);
+        curveTarget[DAIe] = Target(C_DAIe_USDCe_USDTe_POOL, USDCe, 0, 1);
     }
 
     // ---------------------------------------------------------------------------------------- //
     // ************************************ View Functions ************************************ //
     // ---------------------------------------------------------------------------------------- //
 
-    function getCurveMinAmount(address _stablecoin, uint256 _amount) public view returns (uint256) {
+    function getCurveMinAmount(address _stablecoin, uint256 _amount)
+        public
+        view
+        returns (uint256)
+    {
         require(_stablecoin != address(0));
         require(supportedStablecoin[_stablecoin]);
         address stablecoin = _stablecoin;
         uint256 minAmount;
-        while (stablecoin != USDC){
+        while (stablecoin != USDC) {
             minAmount = _getMinAmount(_stablecoin, _amount);
-            stablecoin = curveTarget[stablecoin]._toAddress;
+            stablecoin = curveTarget[_stablecoin].toAddress;
         }
         return minAmount;
     }
 
-    function getPTPMinAmount(address _from, address _to, uint256 _amount) public view returns (uint256) {
+    function getPTPMinAmount(
+        address _from,
+        address _to,
+        uint256 _amount
+    ) public view returns (uint256) {
         require(_from != address(0), "from address cannot be 0");
         require(_to != address(0), "to address cannot be 0");
         require(supportedStablecoin[_from], "from address is not supported");
-        require(supportedStablecoin[_to],  "to address is not supported");
-        (uint256 potentialOutcome, ) = IPTP(PTP_POOL).quotePotentialSwap(_from, _to, _amount);
+        require(supportedStablecoin[_to], "to address is not supported");
+        (uint256 potentialOutcome, ) = IPTP(PTP_POOL).quotePotentialSwap(
+            _from,
+            _to,
+            _amount
+        );
         return potentialOutcome;
     }
-
-
 
     // ---------------------------------------------------------------------------------------- //
     // ************************************ Set Functions ************************************* //
@@ -158,29 +173,26 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
      *
      * @param _stablecoin Stablecoin address
      */
-    function addSupportedStablecoin(address _stablecoin)
-        external
-        onlyOwner
-    {
+    function addSupportedStablecoin(address _stablecoin) external onlyOwner {
         supportedStablecoin[_stablecoin] = true;
-     
+
         emit AddStablecoin(_stablecoin);
     }
 
     function setPTPPool(address _ptpPool) external onlyOwner {
-        emit SetPTPPool(PTPPOOL, _ptpPool);
-        PTPPOOL = _ptpPool;
+        emit SetPTPPool(PTP_POOL, _ptpPool);
+        PTP_POOL = _ptpPool;
     }
 
     function setPTPYUSDPool(address _ptpYUSDPool) external onlyOwner {
-        emit SetPTPPool(PTPYUSDPOOL, _ptpYUSDPool);
-        PTPYUSDPOOL = _ptpYUSDPool;
+        emit SetPTPPool(P_YUSD_POOL, _ptpYUSDPool);
+        P_YUSD_POOL = _ptpYUSDPool;
     }
 
-    function setCurvePool(address _curvePool) external onlyOwner {
-        emit SetCurvePool(CURVEPOOL, _curvePool);
-        CURVEPOOL = _curvePool;
-    }
+    // function setCurvePool(address _curvePool) external onlyOwner {
+    //     emit SetCurvePool(CURVE_POOL, _curvePool);
+    //     CURVE_POOL = _curvePool;
+    // }
 
     function addCurvePool(
         address _stablecoin,
@@ -188,8 +200,14 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         address _toAddress,
         int128 _fromIndex,
         int128 _toIndex
-        ) external onlyOwner {
-            curveTarget[_stablecoin] = Target(_poolToUse, _toAddress, _fromIndex, _toIndex);
+    ) external onlyOwner {
+        curveTarget[_stablecoin] = Target(
+            _poolToUse,
+            _toAddress,
+            _fromIndex,
+            _toIndex
+        );
+        emit AddCurvePool(_stablecoin, _poolToUse);
     }
 
     /**
@@ -203,7 +221,11 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
     }
 
     function approveStablecoin(address _token) external {
-        IERC20(_token).approve(PTPPOOL, type(uint256).max);
+        IERC20(_token).approve(PTP_POOL, type(uint256).max);
+    }
+
+    function approveCurveStablecoin(address _token) external {
+        IERC20(_token).approve(curveTarget[_token].poolToUse, type(uint256).max);
     }
 
     // ---------------------------------------------------------------------------------------- //
@@ -232,23 +254,25 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
 
         // Transfer stablecoin to this contract
         // Transfer to this, no need for safeTransferFrom
-        IERC20(_stablecoin).safeTransferFrom(msg.sender, address(this), _amount);
-
+        IERC20(_stablecoin).safeTransferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
 
         if (_stablecoin != USDC) {
             if (_curve) {
-                outAmount = _curveSwap(_stablecoin, _amount, _minToAmount);
+                outAmount = _curveSwap(_stablecoin, _amount, _minAmount);
             } else {
-            // Swap stablecoin to USDC and directly goes to this contract
-            outAmount = _swap (
-                _stablecoin,
-                USDC,
-                _curve,
-                inAmount,
-                _minAmount,
-                address(this),
-                block.timestamp + 60
-            );
+                // Swap stablecoin to USDC and directly goes to this contract
+                outAmount = _swap(
+                    _stablecoin,
+                    USDC,
+                    inAmount,
+                    _minAmount,
+                    address(this),
+                    block.timestamp + 60
+                );
             }
         } else {
             outAmount = inAmount;
@@ -262,6 +286,7 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
 
         emit Deposit(msg.sender, _stablecoin, _amount, outAmount);
     }
+    
 
     /**
      * @notice Withdraw stablecoins
@@ -316,22 +341,24 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
         address _to,
         uint256 _deadline
     ) internal returns (uint256) {
+        bool success;
+        bytes memory res;
         bytes memory data = abi.encodeWithSignature(
-        "swap(address,address,uint256,uint256,address,uint256)",
-        _fromToken,
-        _toToken,
-        _fromAmount,
-        _minToAmount,
-        _to,
-        _deadline
+            "swap(address,address,uint256,uint256,address,uint256)",
+            _fromToken,
+            _toToken,
+            _fromAmount,
+            _minToAmount,
+            _to,
+            _deadline
         );
 
-        if (_fromToken == YUSD){
-            (bool success, bytes memory res) = P_YUSD_POOL.call(data);
+        if (_fromToken == YUSD) {
+            (success, res) = P_YUSD_POOL.call(data);
         } else {
-            (bool success, bytes memory res) = PTPPOOL.call(data);
+            (success, res) = PTP_POOL.call(data);
         }
-        
+
         require(success, "swap failed");
 
         (uint256 actualAmount, ) = abi.decode(res, (uint256, uint256));
@@ -355,20 +382,31 @@ contract Shield is ERC20Upgradeable, OwnableUpgradeable {
             _minToAmount
         );
 
-        (bool success, bytes memory res) = curveTarget[_fromToken].poolToUse.call(data);
+        (bool success, bytes memory res) = curveTarget[_fromToken]
+            .poolToUse
+            .call(data);
         require(success, "swap failed");
         (uint256 actualAmount, ) = abi.decode(res, (uint256, uint256));
         if (curveTarget[_fromToken].toAddress != USDC) {
-            uint256 min = _getMinAmount(curveTarget[_fromToken].toAddress);
-            _curveSwap(curveTarget[_fromToken].toAddress,  actualAmount, min);
+            uint256 min = _getMinAmount(curveTarget[_fromToken].toAddress, actualAmount);
+            actualAmount = _curveSwap(curveTarget[_fromToken].toAddress, actualAmount, min);
         }
         return actualAmount;
     }
 
-    function _getMinAmount(address _fromAddress, uint256 _amount) internal view returns(uint256) {
-        int128 i = curveTarget[_fromToken].fromIndex;
-        int128 j = curveTarget[_fromToken].toIndex;
-        uint256 expected = curveTarget[_fromAddress].poolToUse.get_dy(i, j, _amount) * 0.99;
+    function _getMinAmount(address _fromAddress, uint256 _amount)
+        internal
+        view
+        returns (uint256)
+    {
+        int128 i = curveTarget[_fromAddress].fromIndex;
+        int128 j = curveTarget[_fromAddress].toIndex;
+        
+        uint256 expected = ICurve(curveTarget[_fromAddress].poolToUse).get_dy(
+            i,
+            j,
+            _amount
+        );
         return expected;
     }
 

@@ -1,26 +1,50 @@
 module.exports = {
   env: {
-    browser: false,
+    browser: true,
     es2021: true,
-    mocha: true,
     node: true,
+    mocha: true,
   },
-  plugins: ["@typescript-eslint"],
   extends: [
-    "standard",
+    "eslint:recommended",
+    // Vue "plugin:vue/essential",
+    // React "plugin:react/recommended",
+    "plugin:@typescript-eslint/recommended",
     "plugin:prettier/recommended",
     "plugin:node/recommended",
   ],
-  parser: "@typescript-eslint/parser",
   parserOptions: {
-    ecmaVersion: 12,
+    ecmaFeatures: {
+      jsx: true,
+    },
+    ecmaVersion: "latest",
+    sourceType: "module",
   },
+  plugins: [
+    // Vue "vue",
+    // React "react",
+    // Typescript "@typescript-eslint",
+    "prettier",
+  ],
   rules: {
+    indent: ["error", 4],
+    "linebreak-style": ["error", "auto"],
+    quotes: ["error", "single"],
+    semi: ["error", "always"],
+    "comma-dangle": ["error", "always-multiline"],
     "node/no-unsupported-features/es-syntax": [
       "error",
       { ignores: ["modules"] },
     ],
-    camelcase: "off",
-    "@typescript-eslint/camelcase": "off",
+    "prettier/prettier": [
+      "error",
+      {
+        endOfLine: "auto",
+      },
+    ],
+    camelcase: "warn",
+    // Typescript "@typescript-eslint/camelcase": "warn",
+    "prefer-const": ["error", { destructuring: "all" }],
+    "no-var": "error",
   },
 };

@@ -5,6 +5,8 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import {
   DegisToken,
   DegisToken__factory,
+  FarmingPool,
+  FarmingPool__factory,
   FarmingPoolUpgradeable,
   FarmingPoolUpgradeable__factory,
   MockPTP,
@@ -17,6 +19,8 @@ import {
   VoteEscrowedDegis__factory,
 } from "../../typechain";
 import { stablecoinToWei } from "../utils";
+
+// npx hardhat test test/tokens/Shield.ts
 
 describe("Shield Token", function () {
   let dev_account: SignerWithAddress;
@@ -72,7 +76,7 @@ describe("Shield Token", function () {
     });
 
     it("should have the correct ptpPool address", async function () {
-      expect(await shield.PTPPOOL()).to.equal(
+      expect(await shield.PTP_POOL()).to.equal(
         "0x66357dCaCe80431aee0A7507e2E361B7e2402370"
       );
     });
@@ -84,9 +88,9 @@ describe("Shield Token", function () {
 
   describe("Owner Functions", function () {
     it("should be able to add supported stablecoins", async function () {
-      await expect(shield.addSupportedStablecoin(mockUSD.address, 120))
+      await expect(shield.addSupportedStablecoin(mockUSD.address))
         .to.emit(shield, "AddStablecoin")
-        .withArgs(mockUSD.address, 120);
+        .withArgs(mockUSD.address);
     });
 
     it("should be able to set ptpPool address", async function () {
@@ -97,11 +101,34 @@ describe("Shield Token", function () {
           ptpPool.address
         );
     });
+
+    it("should be able to set a new curve pool", async function () {
+      await expect(
+        shield
+          .addCurvePool(
+            "0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664",
+            "0x3a43A5851A3e3E0e25A3c1089670269786be1577",
+            "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+            0,
+            1
+          ))
+          .to.emit(shield, "AddCurvePool")
+          .withArgs(
+            "0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664",
+            "0x3a43A5851A3e3E0e25A3c1089670269786be1577"
+          )
+    });
+
+    it("should be able to view if stablecoin is supported", async function () {
+      await shield.addSupportedStablecoin(mockUSD.address);
+      expect(await shield.supportedStablecoin(mockUSD.address)).to.equal(true);
+      expect(await shield.supportedStablecoin("0x111111111111ed1D73f860F57b2798b683f2d325")).to.equal(true);
+    })
   });
 
   describe("Main Functions", function () {
     beforeEach(async function () {
-      await shield.addSupportedStablecoin(mockUSD.address, 100);
+      await shield.addSupportedStablecoin(mockUSD.address);
       await shield.setPTPPool(ptpPool.address);
       await shield.approveStablecoin(mockUSD.address);
     });
@@ -110,6 +137,7 @@ describe("Shield Token", function () {
       await expect(
         shield.deposit(
           mockUSD.address,
+          false,
           stablecoinToWei("100"),
           stablecoinToWei("90")
         )
